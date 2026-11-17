@@ -2,19 +2,43 @@
 
 Ask a question about a company's SEC filings and get a short answer, with every figure linked back to the passage it came from.
 
-![Demo](docs/screenshot.png)
+![Financial Research Assistant](image-1.png)
 
 ## How it works
 
-1. **Retrieve.** Your question is matched against 180 excerpts from 10-K and 10-Q filings. There are three ways to search:
-   - **Meaning** (dense): each passage is turned into an embedding with `all-MiniLM-L6-v2` and stored in ChromaDB, so it finds passages about the same thing even when the wording differs.
-   - **Keywords** (BM25): classic term matching.
-   - **Both** (hybrid): the two scores are min-max normalised and blended 50/50.
-2. **Answer.** The top 10 passages go to Claude with instructions to answer only from that context, cite every claim as `[n]`, and say so if the filings don't contain the answer.
-3. **Cite.** Only the sources the answer actually uses are returned as citations. In the UI you can click a citation to jump to the exact excerpt.
+Take the question: *"How did Boeing's effective tax rate change from FY2021 to FY2022?"*
 
-```
-question ──► retrieval (meaning / keywords / both) ──► top 10 excerpts ──► Claude ──► answer + citations
+**1. Find the evidence**
+
+The app searches 180 excerpts taken from company annual and quarterly reports (10-Ks and 10-Qs) and picks the 10 most relevant. You choose how it searches:
+
+| Option | What it does | Good at |
+|---|---|---|
+| **Meaning** (default) | Compares what your question is *about* with what each passage is about | Finding the right passage even when it uses different words, e.g. "profitability" → "operating margin" |
+| **Keywords** | Looks for passages that share words with your question, giving rarer words more weight | Exact terms, names and figures |
+| **Both** | Scores each passage both ways and averages the two | Balancing the two approaches |
+
+For Boeing, this pulls up the income statement from Boeing's 2022 annual report.
+
+**2. Write the answer**
+
+Those 10 passages, and nothing else, are given to Claude with three rules: only use what's in the passages, label every fact with the passage it came from, and say so if the answer isn't there.
+
+Claude reads the income statement, works out the tax rate for each year (about 14.8% in 2021 and 0.6% in 2022), and notes that it calculated these figures because the filing doesn't state them directly.
+
+**3. Show the sources**
+
+Each fact in the answer carries a small numbered tag. Click it to jump to the exact passage it came from. Passages that were retrieved but not used are greyed out, so you can see exactly what the answer relied on.
+
+<details>
+<summary>Technical details</summary>
+
+- **Meaning search:** passages are converted to vector embeddings with `all-MiniLM-L6-v2` (sentence-transformers) and stored in ChromaDB.
+- **Keyword search:** BM25 via `rank-bm25`.
+- **Both:** each method's scores are min-max normalised to 0–1, then averaged 50/50.
+- **Generation:** Claude via the Anthropic API, with citations parsed from `[n]` markers and filtered to the ones actually used.
+
+</details>
 ```
 
 ## Does it work? The evaluation
