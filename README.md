@@ -1,93 +1,79 @@
-# Financial RAG Engine
+# Financial Research Assistant
 
-One-line pitch, then the problem: Analysts lose hours searching 10-K filings for specific figures; this answers questions over filings with cited sources.
+Ask a question about a company's SEC filings and get a short answer, with every figure linked back to the passage it came from.
 
-## Problem
-Financial analysts spend countless hours manually searching through 10-K filings and other corporate documents to find specific figures, trends, or insights. The fin-rag-engine solves this by providing a RAG (Retrieval-Augmented Generation) system that can answer questions over financial filings with proper source citations.
+![Demo](docs/screenshot.png)
 
 ## How it works
-1. **Hybrid Retrieval**: Combines BM25 (keyword-based) and dense embedding similarity in ChromaDB
-2. **Alpha-weighted fusion**: BM25 and dense scores are combined with a weighted alpha parameter
-3. **Min-max normalization**: Scores are normalized within each retrieval method before fusion
-4. **Claude generates grounded answer**: The selected context is passed to Anthropic's Claude model, which generates an answer with inline citations formatted as [n]
-5. **Citation filtering**: Only references actually mentioned in the answer are included
 
-<details>
-<summary>Click to see retrieval architecture diagram</summary>
+1. **Retrieve.** Your question is matched against 180 excerpts from 10-K and 10-Q filings. There are three ways to search:
+   - **Meaning** (dense): each passage is turned into an embedding with `all-MiniLM-L6-v2` and stored in ChromaDB, so it finds passages about the same thing even when the wording differs.
+   - **Keywords** (BM25): classic term matching.
+   - **Both** (hybrid): the two scores are min-max normalised and blended 50/50.
+2. **Answer.** The top 10 passages go to Claude with instructions to answer only from that context, cite every claim as `[n]`, and say so if the filings don't contain the answer.
+3. **Cite.** Only the sources the answer actually uses are returned as citations. In the UI you can click a citation to jump to the exact excerpt.
 
 ```
-query → BM25 + Dense Embeddings → ChromaDB
-         ↓                  ↓
-   scores α         scores (1-α)  →  Combine → Rerank → Top-k
-         ↓                  ↓
-   Min-Max Norm   Min-Max Norm
-         ↓                  ↓
-   Hybrid Scores → Retrieved Chunks → Claude → Answer with citations
+question ──► retrieval (meaning / keywords / both) ──► top 10 excerpts ──► Claude ──► answer + citations
 ```
 
-</details>
+## Does it work? The evaluation
 
-## Evaluation
+I tested retrieval on the 45 FinanceBench questions that come with relevance labels, measuring whether the right passage appears in the top 10 results (Recall@10) and how high it ranks (MRR@10).
 
-| Method            | Recall@10 | MRR@10 |
-|-------------------|-----------|--------|
-| BM25-only         | 0.3667    | 0.2113 |
-| Dense-only        | 0.9889    | 0.6841 |
-| Hybrid            | 0.9556    | 0.5540 |
+| Search method      | Recall@10 | MRR@10 |
+|--------------------|-----------|--------|
+| Keywords (BM25)    | 0.367     | 0.211  |
+| Meaning (dense)    | **0.989** | **0.684** |
+| Both (hybrid)      | 0.956     | 0.554  |
 
-Dense-only significantly outperformed hybrid retrieval on this FinanceBench benchmark with 180 documents (Recall@10: 0.9889 vs 0.9556, MRR@10: 0.6841 vs 0.5540). This is expected since k=10 retrieves a large share of the 180-document corpus, and the hybrid approach's alpha-weighted fusion can sometimes dilute the strong dense signals. The hybrid approach does provide complementary coverage to BM25-only, which recall@10 of only 0.3667 confirms is limited on this corpus.
+The common advice is that hybrid search beats either method on its own. On this data it didn't. FinanceBench questions are long and wordy ("assume you are an analyst using only the cash flow statement…"), which drowns keyword search in irrelevant terms, and blending it in drags the hybrid score down. So the app defaults to meaning-based search.
 
-**Next steps:** Tune the hybrid weighting (alpha) per query type and add a reranker model to improve hybrid performance. Do not claim hybrid is best on this benchmark.
+Two caveats: the corpus is small (180 passages), so top 10 covers a fair share of it, and this measures retrieval only, not the quality of the final answers.
 
-## Quickstart
-1. Clone the repository
-2. Create a virtual environment: `python3 -m venv .venv && source .venv/bin/activate`
-3. Install dependencies: `pip install -r requirements.txt`
-4. Copy the example env file: `cp .env.example .env`
-5. Add your Anthropic API key to `.env`
-6. Start the server: `uvicorn server.main:app --reload`
-7. Open http://localhost:8000
+## Running it locally
 
-## Running tests
-`pytest`
-
-## Running evaluation
-`python -m rag.evaluate`
-
-## Deploying to Hugging Face Spaces
-This application is configured for Hugging Face Spaces Docker deployment:
-
-```yaml
-sdk: docker
-app_port: 7860
+```bash
+git clone https://github.com/nathandube05/fin-rag-engine.git
+cd fin-rag-engine
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # then add your ANTHROPIC_API_KEY
+uvicorn server.main:app --reload
 ```
 
-Add your `ANTHROPIC_API_KEY` as a Space secret. The Dockerfile pre-downloads the embedding model at build time and the app runs on port 7860.
+Open http://localhost:8000. The first start takes a minute while the embedding model downloads and the vector index builds.
+
+```bash
+pytest                      # tests (no API key needed)
+python -m rag.evaluate      # reproduce the evaluation table
+```
 
 ## Project structure
+
 ```
-fin-rag-engine/
-├── data/              # FinanceBench data (corpus, queries, qrels)
-├── client/            # Single-page frontend (HTML/JS/Tailwind)
-├── docker-compose.yml # (optional) local development
-├── Dockerfile         # HF Spaces deployment
-├── requirements.txt   # Pinned dependencies
-├── server/            # FastAPI backend
-│   └── main.py
-├── rag/               # RAG logic (ingestion, retriever, generator)
-│   ├── ingestion.py
-│   ├── generator.py
-│   └── retriever.py
-├── .env.example      # Environment variable template
-├── .gitignore        # git ignore rules
-└── README.md
+server/main.py     API: search endpoint, Claude call, rate limiting, serves the page
+rag/retriever.py   meaning, keyword and hybrid search
+rag/generator.py   prompt building and citation filtering
+rag/evaluate.py    Recall@10 and MRR@10 on FinanceBench
+rag/ingestion.py   loads the corpus and questions
+client/index.html  the single-page interface
+tests/             unit tests
+data/              FinanceBench corpus, questions and relevance labels
 ```
 
-## Limitations and next steps
-- Whole-document chunks rather than finer chunking (could improve precision)
-- No reranker model (could improve citation relevance)
-- Retrieval-only evaluation (human evaluation needed for end-to-end quality)
-- Single alpha value (could be learned/optimized per query type)
+## Limitations and what I'd do next
 
-## Data credit
-FinanceBench (Patronus AI)
+- **Arithmetic.** Claude does the maths itself, and it's occasionally loose (e.g. rounding a 14.2-point change to "roughly 15"). A calculator tool would fix this.
+- **Whole-passage chunks.** Splitting long excerpts into smaller pieces would make retrieval and citations more precise.
+- **No reranker.** A cross-encoder reranker on the top results is the obvious next step for ranking quality.
+- **Answer quality isn't scored.** The evaluation covers retrieval; checking final answers against FinanceBench's reference answers would close the loop.
+- **Small corpus.** 180 excerpts, not full filings.
+
+## Built with
+
+Python, FastAPI, ChromaDB, sentence-transformers, rank-bm25, the Anthropic API (Claude) and Tailwind CSS.
+
+## Data and licence
+
+Data comes from FinanceBench (Patronus AI, [arXiv:2311.11944](https://arxiv.org/abs/2311.11944)), via the [ICAIF '24 FinanceRAG Challenge](https://www.kaggle.com/competitions/icaif-24-finance-rag-challenge/data) on Kaggle. FinanceBench is released for non-commercial use.
