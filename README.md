@@ -22,13 +22,13 @@ For Boeing, this pulls up the income statement from Boeing's 2022 annual report.
 
 **2. Write the answer**
 
-Those 10 passages, and nothing else, are given to Claude with three rules: only use what's in the passages, label every fact with the passage it came from, and say so if the answer isn't there.
+The retrieved document/documents, and nothing else, are given to Claude with three rules: Claude is to only use what's in the passages, label every fact with the passage it came from, and say so if the answer isn't there.
 
 Claude reads the income statement, works out the tax rate for each year (about 14.8% in 2021 and 0.6% in 2022), and notes that it calculated these figures because the filing doesn't state them directly.
 
 **3. Show the sources**
 
-Each fact in the answer carries a small numbered tag. Click it to jump to the exact passage it came from. Passages that were retrieved but not used are greyed out, so you can see exactly what the answer relied on.
+Each fact in the answer Claude gives to your response carries a small numbered tag. Click it to jump to the exact passage it came from. Passages that were retrieved but not used are greyed out, so you can see exactly what the answer relied on.
 
 <details>
 <summary>Technical details</summary>
@@ -41,21 +41,23 @@ Each fact in the answer carries a small numbered tag. Click it to jump to the ex
 </details>
 ```
 
-## Does it work? The evaluation
+## Does it work?
 
-I tested retrieval on the 45 FinanceBench questions that come with relevance labels, measuring whether the right passage appears in the top 10 results (Recall@10) and how high it ranks (MRR@10).
+FinanceBench includes an answer key: for 45 questions, it marks which passage contains the answer. I used it to check how often each search method finds the right passage.
 
-| Search method      | Recall@10 | MRR@10 |
-|--------------------|-----------|--------|
-| Keywords (BM25)    | 0.367     | 0.211  |
-| Meaning (dense)    | **0.989** | **0.684** |
-| Both (hybrid)      | 0.956     | 0.554  |
+| Search method | Found the right passage (top 10) | How high it ranked (1 = always first) |
+|---|---|---|
+| Keywords | 37% | 0.21 |
+| **Meaning** | **99%** | **0.68** |
+| Both | 96% | 0.55 |
 
-The common advice is that hybrid search beats either method on its own. On this data it didn't. FinanceBench questions are long and wordy ("assume you are an analyst using only the cash flow statement…"), which drowns keyword search in irrelevant terms, and blending it in drags the hybrid score down. So the app defaults to meaning-based search.
+**What I learned:** the usual advice is to combine both methods. On this data, meaning on its own won. Keyword search struggles because the benchmark questions are long and wordy, and mixing it in made results worse. So the app searches by meaning by default.
 
-Two caveats: the corpus is small (180 passages), so top 10 covers a fair share of it, and this measures retrieval only, not the quality of the final answers.
+**Caveats:** the dataset is small (180 passages), and this tests finding the evidence, not the quality of the final written answer.
 
-## Running it locally
+<sub>Metrics: Recall@10 and MRR@10.</sub>
+
+## Running the project locally
 
 ```bash
 git clone https://github.com/nathandube05/fin-rag-engine.git
@@ -86,13 +88,6 @@ tests/             unit tests
 data/              FinanceBench corpus, questions and relevance labels
 ```
 
-## Limitations and what I'd do next
-
-- **Arithmetic.** Claude does the maths itself, and it's occasionally loose (e.g. rounding a 14.2-point change to "roughly 15"). A calculator tool would fix this.
-- **Whole-passage chunks.** Splitting long excerpts into smaller pieces would make retrieval and citations more precise.
-- **No reranker.** A cross-encoder reranker on the top results is the obvious next step for ranking quality.
-- **Answer quality isn't scored.** The evaluation covers retrieval; checking final answers against FinanceBench's reference answers would close the loop.
-- **Small corpus.** 180 excerpts, not full filings.
 
 ## Built with
 
@@ -100,4 +95,4 @@ Python, FastAPI, ChromaDB, sentence-transformers, rank-bm25, the Anthropic API (
 
 ## Data and licence
 
-Data comes from FinanceBench (Patronus AI, [arXiv:2311.11944](https://arxiv.org/abs/2311.11944)), via the [ICAIF '24 FinanceRAG Challenge](https://www.kaggle.com/competitions/icaif-24-finance-rag-challenge/data) on Kaggle. FinanceBench is released for non-commercial use.
+Data comes from the [ICAIF '24 FinanceRAG Challenge](https://www.kaggle.com/competitions/icaif-24-finance-rag-challenge/data) on Kaggle.
